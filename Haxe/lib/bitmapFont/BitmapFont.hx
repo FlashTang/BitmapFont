@@ -9,6 +9,7 @@ import openfl.geom.Matrix;
 import openfl.geom.Point;
 import openfl.geom.Rectangle;
 import openfl.display.Tileset;
+import openfl.display.Tile;
 
 /**
  * Holds information and bitmap glyphs for a bitmap font.
@@ -166,11 +167,9 @@ class BitmapFont
 	public var bitmap:BitmapData;
 	
 	public var glyphs:Map<Int, BitmapGlyphFrame>;
-	
-	#if RENDER_TILE
+
 	public var tileset:Tileset;
-	#end
-	
+
 	/**
 	 * Creates and stores new bitmap font using specified source image.
 	 */
@@ -178,9 +177,7 @@ class BitmapFont
 	{
 		this.bitmap = bitmap;
 		this.fontName = name;
-		#if RENDER_TILE
 		tileset = new Tileset(bitmap);
-		#end
 		glyphs = new Map<Int, BitmapGlyphFrame>();
 		BitmapFont.store(name, this);
 	}
@@ -197,9 +194,7 @@ class BitmapFont
 		}
 		
 		bitmap = null;
-		#if RENDER_TILE
 		tileset = null;
-		#end
 		glyphs = null;
 		fontName = null;
 	}
@@ -247,7 +242,7 @@ class BitmapFont
 			frame.width = Std.parseInt(char.att.width);
 			frameHeight = Std.parseInt(char.att.height);
 			frame.height = frameHeight;
-			
+
 			xOffset = char.has.xoffset ? Std.parseInt(char.att.xoffset) : 0;
 			yOffset = char.has.yoffset ? Std.parseInt(char.att.yoffset) : 0;
 			xAdvance = char.has.xadvance ? Std.parseInt(char.att.xadvance) : 0;
@@ -530,29 +525,9 @@ class BitmapFont
 		glyphFrame.yoffset = offsetY;
 		glyphFrame.xadvance = xAdvance;
 		glyphFrame.rect = frame;
-		
-		#if RENDER_TILE
-		glyphFrame.tileID = tileset.addRect(frame, new Point(0, 0));
-		#end
-		
+		glyphFrame.tileID = tileset.addRect(frame);
 		glyphs.set(charCode, glyphFrame);
 	}
-	
-	#if RENDER_BLIT
-	/**
-	 * Generates special collection of BitmapGlyph objects, which are used in RENDER_BLIT mode.
-	 * These BitmapGlyph objects contain prepared (scales and color transformed) glyph images, which saves some CPU cycles for you.
-	 * 
-	 * @param	scale		How much scale apply to glyphs.
-	 * @param	color		color in AARRGGBB format for glyph preparations.
-	 * @param	useColor	Whether to use color transformation for glyphs.
-	 * @return	Generated collection of BitmapGlyph objects. They are used for rendering text and borders in RENDER_BLIT mode.
-	 */
-	public function prepareGlyphs(scale:Float, color:UInt, useColor:Bool = true, smoothing:Bool = true):BitmapGlyphCollection
-	{
-		return new BitmapGlyphCollection(this, scale, color, useColor, smoothing);
-	}
-	#end
 }
 
 /**
@@ -598,6 +573,8 @@ class BitmapGlyphFrame
 	 * tile id in parent's tileSheet
 	 */
 	public var tileID:Int;
+
+	public var tile:Tile;
 	
 	public function new(parent:BitmapFont)
 	{ 
@@ -622,145 +599,9 @@ class BitmapGlyphFrame
 		{
 			return _bitmap;
 		}
-		
+
 		_bitmap = new BitmapData(Math.ceil(rect.width), Math.ceil(rect.height), true, 0x00000000);
 		_bitmap.copyPixels(parent.bitmap, rect, new Point());
 		return _bitmap;
-	}
-}
-
-/**
- * Helper class for blit render mode to reduce BitmapData draw() method calls.
- * It stores info about transformed (scale and color transformed) bitmap font glyphs. 
- */
-class BitmapGlyphCollection
-{
-	public var minOffsetX:Float = 0;
-	
-	public var glyphMap:Map<Int, BitmapGlyph>;
-	
-	public var glyphs:Array<BitmapGlyph>;
-	
-	public var color:UInt;
-	
-	public var scale:Float;
-	
-	public var spaceWidth:Float = 0;
-	
-	public var font:BitmapFont;
-	
-	public function new(font:BitmapFont, scale:Float, color:UInt, useColor:Bool = true, smoothing:Bool = true)
-	{
-		glyphMap = new Map<Int, BitmapGlyph>();
-		glyphs = new Array<BitmapGlyph>();
-		this.font = font;
-		this.scale = scale;
-		this.color = (useColor) ? color : 0xFFFFFFFF;
-		this.minOffsetX = font.minOffsetX * scale;
-		prepareGlyphs(smoothing);
-	}
-	
-	private function prepareGlyphs(smoothing:Bool = true):Void
-	{
-		var matrix:Matrix = new Matrix();
-		matrix.scale(scale, scale);
-		
-		var colorTransform:ColorTransform = new ColorTransform();
-		colorTransform.redMultiplier = ((color >> 16) & 0xFF) / 255;
-		colorTransform.greenMultiplier = ((color >> 8) & 0xFF) / 255;
-		colorTransform.blueMultiplier = (color & 0xFF) / 255;
-		colorTransform.alphaMultiplier = ((color >> 24) & 0xFF) / 255;
-		
-		var glyphBD:BitmapData;
-		var preparedBD:BitmapData;
-		var glyph:BitmapGlyphFrame;
-		var preparedGlyph:BitmapGlyph;
-		var bdWidth:Int, bdHeight:Int;
-		var offsetX:Int, offsetY:Int, xAdvance:Int;
-		
-		spaceWidth = font.spaceWidth * scale;
-		
-		for (glyph in font.glyphs)
-		{
-			glyphBD = glyph.bitmap;
-			
-			bdWidth = Math.ceil(glyphBD.width * scale);
-			bdHeight = Math.ceil(glyphBD.height * scale);
-			
-			bdWidth = (bdWidth > 0) ? bdWidth : 1;
-			bdHeight = (bdHeight > 0) ? bdHeight : 1;
-			
-			preparedBD = new BitmapData(bdWidth, bdHeight, true, 0x00000000);
-			
-			#if !js
-			preparedBD.draw(glyphBD, matrix, colorTransform, null, null, smoothing);
-			#else
-			preparedBD.draw(glyphBD, matrix, null, null, null, smoothing);
-			preparedBD.colorTransform(preparedBD.rect, colorTransform);
-			#end
-			
-			offsetX = Math.ceil(glyph.xoffset * scale);
-			offsetY = Math.ceil(glyph.yoffset * scale);
-			xAdvance = Math.ceil(glyph.xadvance * scale);
-			
-			preparedGlyph = new BitmapGlyph(glyph.charCode, preparedBD, offsetX, offsetY, xAdvance);
-			
-			glyphs.push(preparedGlyph);
-			glyphMap.set(preparedGlyph.charCode, preparedGlyph);
-		}
-	}
-	
-	public function dispose():Void
-	{
-		if (glyphs != null)
-		{
-			for (glyph in glyphs)
-			{
-				glyph.dispose();
-			}
-		}
-		
-		glyphs = null;
-		glyphMap = null;
-		font = null;
-	}
-}
-
-/**
- * Helper class for blit render mode. 
- * Stores info about single transformed bitmap glyph.
- */
-class BitmapGlyph
-{
-	public var charCode:Int;
-	
-	public var bitmap:BitmapData;
-	
-	public var offsetX:Int = 0;
-	
-	public var offsetY:Int = 0;
-	
-	public var xAdvance:Int = 0;
-	
-	public var rect:Rectangle;
-	
-	public function new(charCode:Int, bmd:BitmapData, offsetX:Int = 0, offsetY:Int = 0, xAdvance:Int = 0)
-	{
-		this.charCode = charCode;
-		this.bitmap = bmd;
-		this.offsetX = offsetX;
-		this.offsetY = offsetY;
-		this.xAdvance = xAdvance;
-		this.rect = bmd.rect;
-	}
-	
-	public function dispose():Void
-	{
-		if (bitmap != null)
-		{
-			bitmap.dispose();
-		}
-		
-		bitmap = null;
 	}
 }

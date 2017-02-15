@@ -11,6 +11,8 @@ import bitmapFont.BitmapFont;
 import haxe.Utf8;
 import openfl.display.PixelSnapping;
 import openfl.display.Tileset;
+import openfl.display.Tilemap;
+import openfl.display.Tile;
 
 /**
  * Class for rendering text with provided bitmap font and some additional options.
@@ -182,55 +184,29 @@ class BitmapTextField extends Sprite
 	
 	private var _fieldWidth:Int = 1;
 	private var _fieldHeight:Int = 1;
-	
-	#if RENDER_BLIT
-	private var _bitmap:Bitmap;
-	private var _bitmapData:BitmapData;
-	
-	/**
-	 * Glyphs for text rendering. Used only in blit render mode.
-	 */
-	private var textGlyphs:BitmapGlyphCollection;
-	/**
-	 * Glyphs for border (shadow or outline) rendering.
-	 * Used only in blit render mode.
-	 */
-	private var borderGlyphs:BitmapGlyphCollection;
-	
-	private var _point:Point;
-	#else
-	private var _drawData:Array<Float>;
-	#end
+	private var _tilemap:Tilemap;
 	
 	/**
 	 * Constructs a new text field component.
 	 * @param font	optional parameter for component's font prop
 	 * @param text	optional parameter for component's text
 	 */
-	public function new(?font:BitmapFont, text:String = "", pixelSnapping:PixelSnapping = null, smoothing:Bool = false)
+	public function new(?userFont:BitmapFont, text:String = "", pixelSnapping:PixelSnapping = null, smoothing:Bool = true)
 	{
 		super();
-		
+
 		shadowOffset = new Point(1, 1);
-		
-		#if RENDER_BLIT
-		pixelSnapping = (pixelSnapping == null) ? PixelSnapping.AUTO : pixelSnapping;
-		_bitmapData = new BitmapData(_fieldWidth, _fieldHeight, true, 0x00000000);
-		_bitmap = new Bitmap(_bitmapData, pixelSnapping, smoothing);
-		addChild(_bitmap);
-		_point = new Point();
-		#else
-		_drawData = [];
-		#end
-		
-		if (font == null)
+
+		if (userFont == null)
 		{
 			font = BitmapFont.getDefaultFont();
 		}
-		
-		this.font = font;
+
+		font = userFont;
+
 		this.text = text;
 		this.smoothing = smoothing;
+		
 	}
 	
 	/**
@@ -245,36 +221,6 @@ class BitmapTextField extends Sprite
 		_lines = null;
 		_linesWidth = null;
 		shadowOffset = null;
-		
-		#if RENDER_BLIT
-		_point = null;
-		
-		if (textGlyphs != null)
-		{
-			textGlyphs.dispose();
-		}
-		textGlyphs = null;
-		
-		if (borderGlyphs != null)
-		{
-			borderGlyphs.dispose();
-		}
-		borderGlyphs = null;
-		
-		if (_bitmap != null)
-		{
-			removeChild(_bitmap);
-		}
-		_bitmap = null;
-		
-		if (_bitmapData != null)
-		{
-			_bitmapData.dispose();
-		}
-		_bitmapData = null;
-		#else
-		_drawData = null;
-		#end
 	}
 	
 	/**
@@ -346,12 +292,30 @@ class BitmapTextField extends Sprite
 	{
 		if (value != text && value != null)
 		{
+			updateTileMap(value);
+
 			text = value;
 			_pendingTextChange = true;
 			checkImmediateChanges();
 		}
 		
 		return value;
+	}
+
+	private function updateTileMap(text:String):Void {
+		_lines = text.split("\n");
+
+		var tileMapWidth:Int = Std.int(textWidth) > 0 ? Std.int(textWidth) : 1;
+		var tileMapHeight:Int = Std.int(textHeight) > 0 ? Std.int(textHeight) : 1;
+
+		if(_tilemap == null) {
+			_tilemap = new Tilemap(tileMapWidth, tileMapHeight, font.tileset);
+			addChild(_tilemap);
+		} else {
+			_tilemap.removeTiles();
+			_tilemap.width = tileMapWidth;
+			_tilemap.height = tileMapHeight;
+		}
 	}
 	
 	private function updateText():Void 
@@ -886,23 +850,6 @@ class BitmapTextField extends Sprite
 	{
 		computeTextSize();
 		var colorForFill:Int = (background) ? backgroundColor : 0x00000000;
-		#if RENDER_BLIT
-		if (_bitmapData == null || (_fieldWidth != _bitmapData.width || _fieldHeight != _bitmapData.height))
-		{
-			if (_bitmapData != null)
-			{
-				_bitmapData.dispose();
-			}
-			
-			_bitmapData = new BitmapData(_fieldWidth, _fieldHeight, true, colorForFill);
-			_bitmap.bitmapData = _bitmapData;
-			_bitmap.smoothing = smoothing;
-		}
-		else 
-		{
-			_bitmapData.fillRect(_bitmapData.rect, colorForFill);
-		}
-		#else
 		this.graphics.clear();
 		
 		if (colorForFill != 0x00000000)
@@ -915,14 +862,8 @@ class BitmapTextField extends Sprite
 		var colorForBorder:UInt = (borderStyle != TextBorderStyle.NONE) ? borderColor : 0xFFFFFFFF;
 		var colorForText:UInt = (useTextColor) ? textColor : 0xFFFFFFFF;
 		
-		_drawData.splice(0, _drawData.length);
-		#end
-		
 		if (size > 0)
 		{
-			#if RENDER_BLIT
-			_bitmapData.lock();
-			#end
 			
 			var numLines:Int = _lines.length;
 			var line:String;
@@ -982,11 +923,7 @@ class BitmapTextField extends Sprite
 						{
 							for (iterX in 0...iterationsX)
 							{
-								#if RENDER_BLIT
-								blitLine(line, borderGlyphs, ox + deltaX * (iterX + 1), oy + deltaY * (iterY + 1));
-								#else
 								renderLine(line, colorForBorder, ox + deltaX * (iterX + 1), oy + deltaY * (iterY + 1));
-								#end
 							}
 						}
 					case OUTLINE:
@@ -996,24 +933,7 @@ class BitmapTextField extends Sprite
 						for (iter in 0...iterations)
 						{
 							itd = delta * (iter + 1);
-							#if RENDER_BLIT
-							//upper-left
-							blitLine(line, borderGlyphs, ox - itd, oy - itd);
-							//upper-middle
-							blitLine(line, borderGlyphs, ox, oy - itd);
-							//upper-right
-							blitLine(line, borderGlyphs, ox + itd, oy - itd);
-							//middle-left
-							blitLine(line, borderGlyphs, ox - itd, oy);
-							//middle-right
-							blitLine(line, borderGlyphs, ox + itd, oy);
-							//lower-left
-							blitLine(line, borderGlyphs, ox - itd, oy + itd);
-							//lower-middle
-							blitLine(line, borderGlyphs, ox, oy + itd);
-							//lower-right
-							blitLine(line, borderGlyphs, ox + itd, oy + itd);
-							#else
+							
 							//upper-left
 							renderLine(line, colorForBorder, ox - itd, oy - itd);
 							//upper-middle
@@ -1030,7 +950,6 @@ class BitmapTextField extends Sprite
 							renderLine(line, colorForBorder, ox, oy + itd);
 							//lower-right
 							renderLine(line, colorForBorder, ox + itd, oy + itd);
-							#end
 						}
 					case OUTLINE_FAST:
 						//Render an outline around the text
@@ -1040,16 +959,6 @@ class BitmapTextField extends Sprite
 						for (iter in 0...iterations)
 						{
 							itd = delta * (iter + 1);
-							#if RENDER_BLIT
-							//upper-left
-							blitLine(line, borderGlyphs, ox - itd, oy - itd);
-							//upper-right
-							blitLine(line, borderGlyphs, ox + itd, oy - itd);
-							//lower-left
-							blitLine(line, borderGlyphs, ox - itd, oy + itd);
-							//lower-right
-							blitLine(line, borderGlyphs, ox + itd, oy + itd);
-							#else
 							//upper-left
 							renderLine(line, colorForBorder, ox - itd, oy - itd);
 							//upper-right
@@ -1058,7 +967,6 @@ class BitmapTextField extends Sprite
 							renderLine(line, colorForBorder, ox - itd, oy + itd);
 							//lower-right
 							renderLine(line, colorForBorder, ox + itd, oy + itd);
-							#end
 						}	
 					case NONE:
 				}
@@ -1087,66 +995,13 @@ class BitmapTextField extends Sprite
 					ox += padding;
 				}
 				
-				#if RENDER_BLIT
-				blitLine(line, textGlyphs, ox, oy);
-				#else
 				renderLine(line, colorForText, ox, oy);
-				#end
 			}
-			
-			#if RENDER_BLIT
-			_bitmapData.unlock();
-			#else
-			font.tileset.drawTiles(this.graphics, _drawData, smoothing, Tilesheet.TILE_SCALE | Tilesheet.TILE_RGB | Tilesheet.TILE_ALPHA);
-			#end
 		}
 		
 		_pendingGraphicChange = false;
 	}
 	
-	#if RENDER_BLIT
-	private function blitLine(line:String, glyphs:BitmapGlyphCollection, startX:Int, startY:Int):Void
-	{
-		if (glyphs == null) return;
-		
-		var glyph:BitmapGlyph;
-		var charCode:Int;
-		var curX:Int = startX;
-		var curY:Int = startY;
-		
-		var spaceWidth:Int = Std.int(font.spaceWidth * size);
-		var tabWidth:Int = Std.int(spaceWidth * numSpacesInTab);
-		
-		var lineLength:Int = Utf8.length(line);
-		
-		for (i in 0...lineLength)
-		{
-			charCode = Utf8.charCodeAt(line, i);
-			
-			if (charCode == BitmapFont.spaceCode)
-			{
-				curX += spaceWidth;
-			}
-			else if (charCode == BitmapFont.tabCode)
-			{
-				curX += tabWidth;
-			}
-			else
-			{
-				glyph = glyphs.glyphMap.get(charCode);
-				if (glyph != null)
-				{
-					_point.x = curX + glyph.offsetX;
-					_point.y = curY + glyph.offsetY;
-					_bitmapData.copyPixels(glyph.bitmap, glyph.rect, _point, null, null, true);
-					curX += glyph.xAdvance;
-				}				
-			}
-			
-			curX += letterSpacing;
-		}
-	}
-	#else
 	private function renderLine(line:String, color:UInt, startX:Int, startY:Int):Void
 	{
 		var glyph:BitmapGlyphFrame;
@@ -1161,8 +1016,6 @@ class BitmapTextField extends Sprite
 		var g:Float = ((color >> 8) & 0xFF) / 255;
 		var b:Float = (color & 0xFF) / 255;
 		var a:Float = ((color >> 24) & 0xFF) / 255;
-		
-		var pos:Int = _drawData.length;
 		
 		var lineLength:Int = Utf8.length(line);
 		
@@ -1183,26 +1036,20 @@ class BitmapTextField extends Sprite
 				glyph = font.glyphs.get(charCode);
 				if (glyph != null)
 				{
-					_drawData[pos++] = curX + glyph.xoffset * size;
-					_drawData[pos++] = curY + glyph.yoffset * size;
-				
-					_drawData[pos++] = glyph.tileID;
-					
-					_drawData[pos++] = size;
-					
-					_drawData[pos++] = r;
-					_drawData[pos++] = g;
-					_drawData[pos++] = b;
-					_drawData[pos++] = a;
+					var tile:Tile = new Tile(glyph.tileID);
+					tile.x = curX + glyph.xoffset * size;
+					tile.y = curY + glyph.yoffset * size;
+					tile.scaleX = tile.scaleY = size;
 					
 					curX += glyph.xadvance * size;
+
+					_tilemap.addTile(tile);
 				}				
 			}
 			
 			curX += letterSpacing;
 		}
 	}
-	#end
 	
 	/**
 	 * Set border's style (shadow, outline, etc), color, and size all in one go!
@@ -1367,6 +1214,7 @@ class BitmapTextField extends Sprite
 		if (tmp != size)
 		{
 			size = tmp;
+			updateTileMap(text);
 			_pendingTextGlyphsChange = true;
 			_pendingBorderGlyphsChange = true;
 			_pendingTextChange = true;
@@ -1542,48 +1390,23 @@ class BitmapTextField extends Sprite
 	
 	private function set_smoothing(value:Bool):Bool
 	{
-		#if RENDER_BLIT
-		_bitmap.smoothing = value;
-		#else
 		if (smoothing != value)
 		{
 			_pendingGraphicChange = true;
 			checkImmediateChanges();
 		}
-		#end
 		
 		return smoothing = value;
 	}
 	
 	private function updateTextGlyphs():Void
 	{
-		#if RENDER_BLIT
-		if (font == null)	return;
-		
-		if (textGlyphs != null)
-		{
-			textGlyphs.dispose();
-		}
-		textGlyphs = font.prepareGlyphs(size, textColor, useTextColor, smoothing);
-		#end
-		
 		_pendingTextGlyphsChange = false;
 		_pendingGraphicChange = true;
 	}
 	
 	private function updateBorderGlyphs():Void
 	{
-		#if RENDER_BLIT
-		if (font != null && (borderGlyphs == null || borderColor != borderGlyphs.color || size != borderGlyphs.scale || font != borderGlyphs.font))
-		{
-			if (borderGlyphs != null)
-			{
-				borderGlyphs.dispose();
-			}
-			borderGlyphs = font.prepareGlyphs(size, borderColor, true, smoothing);
-		}
-		#end
-		
 		_pendingBorderGlyphsChange = false;
 		_pendingGraphicChange = true;
 	}
