@@ -309,7 +309,7 @@ class BitmapTextField extends Sprite
 		var tileMapHeight:Int = Std.int(textHeight) > 0 ? Std.int(textHeight) : 1;
 
 		if(_tilemap == null) {
-			_tilemap = new Tilemap(tileMapWidth, tileMapHeight, font.tileset);
+			_tilemap = new Tilemap(tileMapWidth, tileMapHeight, font.tileset,this.smoothing);
 			addChild(_tilemap);
 		} else {
 			_tilemap.removeTiles();
